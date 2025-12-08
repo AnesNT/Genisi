@@ -90,7 +90,7 @@ def call_google_grid(prompt, session_id, is_pro_mode=False):
 def call_deepseek_real(prompt):
     """الاتصال الحقيقي بـ Hugging Face (بدون مشاكل CORS)"""
     print("📡 Connecting to DeepSeek...")
-    api_url = f"https://api-inference.huggingface.co/models/{DEEPSEEK_MODEL}"
+    api_url = f"https://huggingface.co/models/{DEEPSEEK_MODEL}"
     headers = {"Authorization": f"Bearer {HF_KEY}"}
     payload = {
         "inputs": f"<|user|>\n{prompt}\n<|assistant|>\n",
@@ -159,3 +159,4 @@ if __name__ == '__main__':
     print("🔒 27 Google Keys Loaded | DeepSeek Access Ready")
 
     app.run(port=5000, debug=True)
+
