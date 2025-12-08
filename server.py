@@ -49,7 +49,7 @@ def call_google_grid(prompt, session_id, is_pro_mode=False):
     """نظام التدوير النووي للاتصال بجوجل"""
     global key_pointer
     
-    model_name = "gemini-1.5-pro" if is_pro_mode else "gemini-1.5-flash"
+    model_name = "gemini-2.5-flash-lite" if is_pro_mode else "gemini-2.5-flash-lite"
     
     # تعليمات النظام بناء على الوضع
     sys_instruct = "You are Genisi. Helpful and fast."
@@ -157,4 +157,5 @@ def chat_endpoint():
 if __name__ == '__main__':
     print("🔥 Genisi Core Server Online at http://localhost:5000")
     print("🔒 27 Google Keys Loaded | DeepSeek Access Ready")
+
     app.run(port=5000, debug=True)
