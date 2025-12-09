@@ -1,3 +1,4 @@
+import os
 import time
 import random
 from flask import Flask, request, jsonify
@@ -29,7 +30,7 @@ GRID_KEYS = [
     "AIzaSyC5k4Slts-MNroLOgPwh_j2QvZARYzd8Lg"
 ]
 
-HF_KEY = "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"
+HF_KEY = os.environ.get("HF_KEY") 
 DEEPSEEK_MODEL = "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B"
 
 # مؤشر المفتاح الحالي
@@ -159,5 +160,6 @@ if __name__ == '__main__':
     print("🔒 27 Google Keys Loaded | DeepSeek Access Ready")
 
     app.run(port=5000, debug=True)
+
 
 
