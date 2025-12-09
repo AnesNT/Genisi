@@ -1,165 +1,100 @@
 import os
 import time
-import random
+import requests
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import google.generativeai as genai
-import requests
 
 app = Flask(__name__)
-# السماح للواجهة بالاتصال بالسيرفر
-CORS(app) 
+CORS(app)
 
-# ==========================================
-# 🔐 الخزنة (The Vault) - مفاتيحك آمنة هنا
-# ==========================================
-GRID_KEYS = [
-    "AIzaSyCkUhP0VSdA-XiCpBle5s8N0wVTqzYnjFk", "AIzaSyBfw1RUccXYLgz1jx31pXBs2v8mNc9UVhE",
-    "AIzaSyDVRu7tfXgmpDUCf0vwkG08gGP3HD2S3bw", "AIzaSyBLvP9OqGOaW70XBnqMGPfNKi1uldQQbbs",
-    "AIzaSyB0Lt_TizvCHdM7wkGn1Q4Qsc3gBF8tdpw", "AIzaSyAI3-Z87ytRDeQzQmgyHv4Aa3f1ANzsoIU",
-    "AIzaSyCLZlc50Gouu30TlvjWkYZieACxTbohcfM", "AIzaSyDfOyvu4y932Sud7yzgr-z4P5sDvbKc8DA",
-    "AIzaSyA5IODgGmTqGauRsiZmCeQ087imoRsKm2k", "AIzaSyCJJWHR-S74aruBjs__L3UidBioOgkowvU",
-    "AIzaSyAkMHthkVHGykjeLcpoGN-fdDWCB7c49GU", "AIzaSyDk3dm3aUryxXYlp_tdMGh9ZPVyV-9yd4g",
-    "AIzaSyDWqpgRTJA3wYi8Hm-H3DikUroN_836Rto", "AIzaSyAXBBud7VcB-o6I7YmPRFRLQM-oIX6-TIU",
-    "AIzaSyB-ILoGD8iV6y3YmvVGRjmkW4uKRCS96_k", "AIzaSyD7rDmDvojLncPNi_68QgFVK9dn-Mu5APY",
-    "AIzaSyDyR4p9LuDeEJyfODJvR8-PrS-9l9zov_o", "AIzaSyDZjwU_nHd4ulvY4_JCHeVLspdnuODZE6s",
-    "AIzaSyDVyZ-KmHQid8brne-4ki0xWnZ61Mz1FKw", "AIzaSyCLdIMi-yz4ARjiObvKVafmI8gs5UD7Pj0",
-    "AIzaSyCrFawrGYZbt6fO_AupIW6gMWwnyAIAapM", "AIzaSyBBCyWiGo-H6Yxu5PwED0gMLkFS_5bmx1I",
-    "AIzaSyBBCPp3C-3fUWMF7reZE7eiKEAJSqV0gQ0", "AIzaSyCowg54FCclWWTOe67hFxRCXN90HdMn1Jk",
-    "AIzaSyDAiwqjNkoxwdaAiQAZuehukOLhWedtkVw", "AIzaSyDLhJwBwu1azap5md_HXDtLDAzNuPHG3-Q",
-    "AIzaSyC5k4Slts-MNroLOgPwh_j2QvZARYzd8Lg"
-]
+# =======================================================
+# 🔐 الإعدادات: Llama 3.1 Engine
+# =======================================================
+# المفتاح يتم جلبه من متغيرات بيئة Render
+# تأكد أنك وضعت متغير اسمه HF_KEY في إعدادات Render
+HF_TOKEN = os.environ.get("HF_KEY") 
 
-HF_KEY = os.environ.get("HF_KEY") 
-DEEPSEEK_MODEL = "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B"
+# رابط النموذج الرسمي في Hugging Face
+API_URL = "https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct?inference_provider=sambanova"
 
-# مؤشر المفتاح الحالي
-key_pointer = 0
-history_store = {} # ذاكرة بسيطة في الرام
-
-# -------------------------------------------
-# وظائف النظام (System Functions)
-# -------------------------------------------
-
-def get_next_key():
-    global key_pointer
-    key_pointer = (key_pointer + 1) % len(GRID_KEYS)
-    return GRID_KEYS[key_pointer]
-
-def call_google_grid(prompt, session_id, is_pro_mode=False):
-    """نظام التدوير النووي للاتصال بجوجل"""
-    global key_pointer
+# دالة الاتصال بـ Llama
+def query_llama(prompt, retries=3):
+    headers = {"Authorization": f"Bearer {HF_TOKEN}"}
     
-    model_name = "gemini-2.5-flash-lite" if is_pro_mode else "gemini-2.5-flash-lite"
-    
-    # تعليمات النظام بناء على الوضع
-    sys_instruct = "You are Genisi. Helpful and fast."
-    if is_pro_mode:
-        sys_instruct = "You are Genisi Pro (DeepSeek Emulator). Reason deeply. Provide code, math, and technical details expertly."
+    # 1. إعداد البرومبت الخاص بـ Llama 3
+    # Llama 3 يفهم هيكلية خاصة للأوامر (System > User > Assistant)
+    full_prompt = f"""<|begin_of_text|><|start_header_id|>system<|end_header_id|>
+You are Genisi, an advanced AI developed by AnesNT.
+Your goal is to provide helpful, accurate, and concise answers.
+You speak the user's language fluently (Arabic/English/etc).
+<|eot_id|><|start_header_id|>user<|end_header_id|>
+{prompt}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+"""
 
-    attempts = 0
-    max_retries = len(GRID_KEYS) # نجرب كل المفاتيح
-
-    while attempts < max_retries:
-        key = get_next_key()
-        try:
-            genai.configure(api_key=key)
-            model = genai.GenerativeModel(model_name, system_instruction=sys_instruct)
-            
-            # استرجاع الذاكرة
-            chat_history = history_store.get(session_id, [])
-            chat = model.start_chat(history=chat_history)
-            
-            response = chat.send_message(prompt)
-            
-            # تحويل الرد إلى نص نقي لتخزينه في الذاكرة اليدوية إذا لزم الأمر
-            # لكن SDK جوجل يدير الذاكرة في start_chat بشكل جيد،
-            # هنا سنحدث الذاكرة المخزنة لدينا لاستخدامها في حال تبديل المفتاح
-            # ملاحظة: لتحقيق نقل سياق مثالي بين مفاتيح مختلفة، يجب تحويل history جوجل لقاموس
-            # للتبسيط هنا نعتمد على أن الموديل يعيد رداً واحداً.
-            
-            return response.text
-            
-        except Exception as e:
-            print(f"⚠️ Node Fail ({key[:5]}...): {e}")
-            attempts += 1
-            # المحاولة مع المفتاح التالي
-    
-    raise Exception("System Overload: All 27 Nodes are busy.")
-
-
-def call_deepseek_real(prompt):
-    """الاتصال الحقيقي بـ Hugging Face (بدون مشاكل CORS)"""
-    print("📡 Connecting to DeepSeek...")
-    api_url = f"https://huggingface.co/models/{DEEPSEEK_MODEL}"
-    headers = {"Authorization": f"Bearer {HF_KEY}"}
     payload = {
-        "inputs": f"<|user|>\n{prompt}\n<|assistant|>\n",
-        "parameters": {"max_new_tokens": 1500, "temperature": 0.6, "return_full_text": False}
+        "inputs": full_prompt,
+        "parameters": {
+            "max_new_tokens": 1024,  # طول الإجابة
+            "temperature": 0.7,      # نسبة الإبداع
+            "top_p": 0.9,
+            "return_full_text": False
+        }
     }
-    
-    response = requests.post(api_url, headers=headers, json=payload)
-    
-    if response.status_code != 200:
-        raise Exception(f"DeepSeek Error: {response.text}")
-        
-    result = response.json()
-    # استخراج النص
-    if isinstance(result, list):
-        return result[0]['generated_text']
-    return result.get('generated_text', '')
 
+    # محاولة الاتصال مع تكرار المحاولة في حالة "السيرفر مشغول"
+    for i in range(retries):
+        try:
+            response = requests.post(API_URL, headers=headers, json=payload, timeout=30)
+            
+            # حالة تحميل الموديل (تحدث في HF Free Tier)
+            if response.status_code == 503:
+                print(f"Model loading... wait {i+1}s")
+                time.sleep(2)
+                continue # نعيد المحاولة
+                
+            if response.status_code != 200:
+                raise Exception(f"HF Error {response.status_code}: {response.text}")
 
-# -------------------------------------------
-# الواجهة البرمجية (API Routes)
-# -------------------------------------------
+            result = response.json()
+            
+            # استخراج النص
+            if isinstance(result, list):
+                return result[0]['generated_text']
+            elif 'generated_text' in result:
+                return result['generated_text']
+            else:
+                return str(result)
+                
+        except Exception as e:
+            print(f"Attempt {i+1} failed: {e}")
+            if i == retries - 1: # آخر محاولة
+                raise e
+
+    return "Llama server is busy right now. Please try again."
 
 @app.route('/chat', methods=['POST'])
-def chat_endpoint():
+def chat():
     data = request.json
-    prompt = data.get('text', '')
-    mode = data.get('mode', 'std') # 'std' or 'pro' (deepseek)
-    session_id = data.get('session', 'guest')
+    text = data.get('text', '')
 
-    print(f"📨 Incoming: {prompt[:20]}... [Mode: {mode}]")
+    if not text:
+        return jsonify({"type": "error", "reply": "Empty message"})
 
     try:
-        reply = ""
-        
-        # 1. Image Generation Check
-        if any(x in prompt.lower() for x in ['image', 'draw', 'رسم', 'ارسم', 'صورة', 'تخيل']):
-            # نرسل وصفاً للصورة
+        # فحص بسيط للصور (سنبقي الميزة فهي لا علاقة لها بجوجل)
+        if any(x in text.lower() for x in ['image', 'draw', 'رسم', 'صورة', 'تخيل']):
             return jsonify({
                 "type": "image", 
-                "prompt": prompt, 
-                "reply": "Generating Flux Image..."
+                "reply": "Flux Generator"
             })
 
-        # 2. Text Logic
-        if mode == 'pro':
-            try:
-                # محاولة الاتصال بـ DeepSeek الحقيقي
-                reply = call_deepseek_real(prompt)
-                reply = reply.replace("<|assistant|>", "").replace("<|user|>", "").strip()
-            except Exception as e:
-                # نظام الحماية: إذا فشل ديبسيك، حول لجوجل برو
-                print(f"❌ DeepSeek Fail, Fallback to Grid Pro. Error: {e}")
-                reply = call_google_grid(prompt, session_id, is_pro_mode=True)
-                reply = "⚠️ [Backup System Active]\n" + reply
-        else:
-            # الوضع العادي
-            reply = call_google_grid(prompt, session_id, is_pro_mode=False)
-
-        return jsonify({"type": "text", "reply": reply})
+        # الاتصال بـ Llama
+        reply = query_llama(text)
+        return jsonify({"type": "text", "reply": reply.strip()})
 
     except Exception as e:
         return jsonify({"type": "error", "reply": str(e)}), 500
 
 if __name__ == '__main__':
-    print("🔥 Genisi Core Server Online at http://localhost:5000")
-    print("🔒 27 Google Keys Loaded | DeepSeek Access Ready")
-
-    app.run(port=5000, debug=True)
-
-
-
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
