@@ -13,7 +13,7 @@ CORS(app)
 HF_TOKEN = os.environ.get("HF_KEY") 
 
 # هذا النموذج وحش، ومجاني، ولا يسبب مشاكل 404 مثل لاما
-API_URL = "https://huggingface.co/Qwen/Qwen2.5-VL-72B-Instruct"
+API_URL = "https://huggingface.co/Qwen/Qwen2.5-7B-Instruct"
 
 def query_huggingface(prompt, retries=5):
     headers = {"Authorization": f"Bearer {HF_TOKEN}"}
@@ -98,3 +98,4 @@ def chat():
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
+
