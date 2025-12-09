@@ -15,7 +15,7 @@ CORS(app)
 HF_TOKEN = os.environ.get("HF_KEY") 
 
 # رابط النموذج الرسمي في Hugging Face
-API_URL = "https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct?inference_provider=sambanova"
+API_URL = "https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct"
 
 # دالة الاتصال بـ Llama
 def query_llama(prompt, retries=3):
@@ -98,3 +98,4 @@ def chat():
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
+
