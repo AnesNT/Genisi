@@ -1,5 +1,4 @@
-flask
-flask-cors
-gunicorn
-google-generativeai
-requests
+fastapi
+httpx
+uvicorn
+python-dotenv
