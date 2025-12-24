@@ -1,101 +1,62 @@
-import os
-import time
-import requests
-from flask import Flask, request, jsonify
-from flask_cors import CORS
+from fastapi import FastAPI, HTTPException
+import httpx, os, base64, datetime, json
 
-app = Flask(__name__)
-CORS(app)
+app = FastAPI()
 
-# =======================================================
-# 🔐 المحرك: Qwen 2.5 72B (أقوى نموذج مفتوح حالياً)
-# =======================================================
-HF_TOKEN = os.environ.get("HF_KEY") 
+OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY")
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+GITHUB_REPO = os.getenv("GITHUB_REPO")  # مثال: "AnesNT/genisi-data"
+FILE_PATH = "answers.json"
 
-# هذا النموذج وحش، ومجاني، ولا يسبب مشاكل 404 مثل لاما
-API_URL = "https://huggingface.co/Qwen/Qwen2.5-7B-Instruct"
+OLLAMA_URL = "https://api.ollama.com/v1/chat/completions"
 
-def query_huggingface(prompt, retries=5):
-    headers = {"Authorization": f"Bearer {HF_TOKEN}"}
-    
-    # تنسيق الرسالة الخاص بـ Qwen (ChatML)
-    # هذا التنسيق مهم جداً ليفهم أنك تتحدث معه وليس تكملة نص
-    final_prompt = f"""<|im_start|>system
-You are Genisi, an advanced AI developed by AnesNT. 
-You are helpful, professional, and precise. 
-Answer in the same language as the user (Arabic/English).<|im_end|>
-<|im_start|>user
-{prompt}<|im_end|>
-<|im_start|>assistant
-"""
+@app.post("/ask")
+async def ask_question(payload: dict):
+    question = payload.get("question")
+    mode = payload.get("mode", "fast")  # fast=20B, deep=120B
 
-    payload = {
-        "inputs": final_prompt,
-        "parameters": {
-            "max_new_tokens": 1500,  # مساحة للكتابة الطويلة
-            "temperature": 0.6,
-            "return_full_text": False
-        }
+    if not question:
+        raise HTTPException(status_code=400, detail="السؤال مطلوب")
+
+    model = "gpt-oss:20b-cloud" if mode == "fast" else "gpt-oss:120b-cloud"
+
+    headers = {"Authorization": f"Bearer {OLLAMA_API_KEY}", "Content-Type": "application/json"}
+    body = {"model": model, "messages": [{"role": "user", "content": question}]}
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.post(OLLAMA_URL, headers=headers, json=body)
+
+    if resp.status_code != 200:
+        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+
+    data = resp.json()
+    answer = data["choices"][0]["message"]["content"]
+
+    # 📝 إدخال جديد للتخزين
+    entry = {
+        "timestamp": datetime.datetime.utcnow().isoformat(),
+        "question": question,
+        "answer": answer,
+        "model": model
     }
 
-    for i in range(retries):
-        try:
-            response = requests.post(API_URL, headers=headers, json=payload, timeout=40)
-            
-            # 503 تعني السيرفر يقوم بتحميل النموذج (بارد)
-            if response.status_code == 503:
-                wait_time = response.json().get("estimated_time", 5)
-                print(f"❄️ Model loading... sleeping {wait_time}s")
-                time.sleep(wait_time)
-                continue
-                
-            if response.status_code != 200:
-                raise Exception(f"HF Error {response.status_code}: {response.text}")
+    # تحديث الملف في GitHub
+    gh_headers = {"Authorization": f"Bearer {GITHUB_TOKEN}"}
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(f"https://api.github.com/repos/{GITHUB_REPO}/contents/{FILE_PATH}", headers=gh_headers)
+        if resp.status_code == 200:
+            content = resp.json()
+            old_data = json.loads(base64.b64decode(content["content"]).decode("utf-8"))
+            old_data.append(entry)
+            sha = content["sha"]
+        else:
+            old_data = [entry]
+            sha = None
 
-            result = response.json()
-            
-            # استخراج النص بذكاء
-            if isinstance(result, list) and len(result) > 0:
-                text = result[0].get('generated_text', '')
-            else:
-                text = result.get('generated_text', '')
-                
-            # تنظيف الرموز الخاصة بـ Qwen
-            clean_text = text.replace("<|im_end|>", "").strip()
-            return clean_text
-                
-        except Exception as e:
-            print(f"⚠️ Attempt {i+1} failed: {e}")
-            if i == retries - 1:
-                return "Genisi Servers are experiencing high traffic. Please try again in 10 seconds."
-            time.sleep(2)
+        encoded = base64.b64encode(json.dumps(old_data, indent=2).encode("utf-8")).decode("utf-8")
+        update_body = {"message": f"Add answer {entry['timestamp']}", "content": encoded, "branch": "main"}
+        if sha: update_body["sha"] = sha
 
-    return "Server Error."
+        await client.put(f"https://api.github.com/repos/{GITHUB_REPO}/contents/{FILE_PATH}", headers=gh_headers, json=update_body)
 
-@app.route('/chat', methods=['POST'])
-def chat():
-    data = request.json
-    text = data.get('text', '')
-
-    if not text:
-        return jsonify({"type": "error", "reply": "No text provided"})
-
-    try:
-        # 1. كاشف الصور (لا يتغير)
-        if any(x in text.lower() for x in ['image', 'draw', 'رسم', 'صورة', 'تخيل']):
-            return jsonify({
-                "type": "image", 
-                "reply": "Flux"
-            })
-
-        # 2. محرك النصوص (Qwen 72B)
-        reply = query_huggingface(text)
-        return jsonify({"type": "text", "reply": reply})
-
-    except Exception as e:
-        return jsonify({"type": "error", "reply": str(e)}), 500
-
-if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
-
+    return {"model": model, "answer": answer}
